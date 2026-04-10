@@ -1,0 +1,147 @@
+import { useState, useCallback, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { fetchArticles, ArticleFilters } from './api/articles'
+import { Header } from './components/Header'
+import { FilterBar } from './components/FilterBar'
+import { ArticleCard } from './components/ArticleCard'
+import { Pagination } from './components/Pagination'
+import { Loader2, ServerOff } from 'lucide-react'
+
+const LIMIT = 20
+
+// Debounce hook
+function useDebounce<T>(value: T, delay = 300): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(t)
+  }, [value, delay])
+  return debounced
+}
+
+export default function App() {
+  const [page, setPage] = useState(1)
+  const [company, setCompany] = useState('')
+  const [topic, setTopic] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
+
+  const debouncedSearch = useDebounce(searchInput, 350)
+
+  const filters: ArticleFilters = {
+    page,
+    limit: LIMIT,
+    sort,
+    ...(company && { company }),
+    ...(topic && { topic }),
+    ...(debouncedSearch && { q: debouncedSearch }),
+  }
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['articles', filters],
+    queryFn: () => fetchArticles(filters),
+  })
+
+  const resetPage = useCallback(() => setPage(1), [])
+
+  function handleCompany(v: string) { setCompany(v); resetPage() }
+  function handleTopic(v: string) { setTopic(v); resetPage() }
+  function handleSearch(v: string) { setSearchInput(v); resetPage() }
+  function handleSort(v: 'newest' | 'oldest') { setSort(v); resetPage() }
+  function handleClear() { setCompany(''); setTopic(''); setSearchInput(''); resetPage() }
+
+  return (
+    <div className="min-h-screen">
+      <Header />
+
+      <main className="max-w-7xl mx-auto px-4 py-6">
+        {/* Filter bar */}
+        <div className="mb-6">
+          <FilterBar
+            companies={data?.companies ?? []}
+            topics={data?.topics ?? []}
+            selectedCompany={company}
+            selectedTopic={topic}
+            searchQuery={searchInput}
+            sort={sort}
+            onCompanyChange={handleCompany}
+            onTopicChange={handleTopic}
+            onSearchChange={handleSearch}
+            onSortChange={handleSort}
+            onClear={handleClear}
+          />
+        </div>
+
+        {/* Stats bar */}
+        {data && (
+          <p className="text-sm text-gray-400 dark:text-gray-500 mb-4">
+            {data.total.toLocaleString()} articles
+            {company && ` · ${company}`}
+            {topic && ` · #${topic}`}
+            {debouncedSearch && ` · "${debouncedSearch}"`}
+            {data.updatedAt && ` · 更新于 ${new Date(data.updatedAt).toLocaleDateString('zh-CN')}`}
+          </p>
+        )}
+
+        {/* Loading */}
+        {isLoading && (
+          <div className="flex items-center justify-center py-20 text-gray-400">
+            <Loader2 className="w-6 h-6 animate-spin mr-2" />
+            Loading articles…
+          </div>
+        )}
+
+        {/* Error */}
+        {isError && (
+          <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-3">
+            <ServerOff className="w-10 h-10" />
+            <p className="text-sm">articles.json 加载失败，请先运行部署脚本</p>
+            <code className="text-xs bg-gray-100 dark:bg-gray-800 px-3 py-1 rounded">
+              ./scripts/deploy.sh
+            </code>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!isLoading && !isError && data?.items.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-gray-400 gap-3">
+            <p className="text-sm">No articles found.</p>
+            {(company || topic || debouncedSearch) && (
+              <button onClick={handleClear} className="text-indigo-500 text-sm hover:underline">
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Article grid */}
+        {data && data.items.length > 0 && (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {data.items.map(article => (
+                <ArticleCard
+                  key={article.id}
+                  article={article}
+                  onTopicClick={handleTopic}
+                />
+              ))}
+            </div>
+
+            <Pagination
+              page={data.page}
+              pages={data.pages}
+              total={data.total}
+              onPage={setPage}
+            />
+          </>
+        )}
+      </main>
+
+      <footer className="border-t border-gray-200 dark:border-gray-800 py-4 mt-8">
+        <p className="text-center text-xs text-gray-400 dark:text-gray-600">
+          DistSys Feed · Updated daily · Summaries generated by Claude AI
+        </p>
+      </footer>
+    </div>
+  )
+}
